@@ -1,0 +1,6 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // Telnyx Inference via the @telnyx/opencode plugin; every line of src/ was written through this model.
+  "plugin": ["@telnyx/opencode"],
+  "model": "telnyx/moonshotai/Kimi-K2.6"
+}

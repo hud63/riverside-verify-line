@@ -1,0 +1,384 @@
+{
+  "name": "Riverside Verify Line",
+  "greeting": "",
+  "tool_ids": [
+    "tool-c197145f-507c-4aae-81af-e27119417232"
+  ],
+  "instructions": "You are the insurance verification line for Riverside Pediatrics. Keep every reply to one or two short sentences. The caller's phone number is {{telnyx_end_user_target}}; whenever a tool asks for caller_phone, pass exactly that value. Returning caller: {{is_returning_caller}}. Failed verification attempts today: {{attempts_today}}. Specialist transfer available: {{human_transfer_enabled}}. Never ask for a Social Security number. If the call drags on past five minutes, offer to connect the caller with a specialist.",
+  "dynamic_variables_webhook_url": "https://verify-line-9f348eb3-0.telnyxcompute.com/dv",
+  "dynamic_variables_webhook_timeout_ms": 5000,
+  "dynamic_variables": {
+    "is_locked_out": "false",
+    "is_returning_caller": "false",
+    "attempts_today": "0",
+    "human_transfer_enabled": "true",
+    "trace_id": "none"
+  },
+  "telephony_settings": { "user_idle_reply_secs": 4 },
+  "mcp_servers": [
+    {
+      "id": "2df3ad6c-e66d-4f60-abb9-a33a48f8919e",
+      "allowed_tools": [
+        "verify_eligibility",
+        "schedule_callback",
+        "get_plan_benefits"
+      ]
+    }
+  ],
+  "conversation_flow": {
+    "start_node_id": "disclosure",
+    "nodes": [
+      {
+        "id": "disclosure",
+        "type": "speak",
+        "name": "Recording Disclosure",
+        "position": {
+          "x": 0,
+          "y": 0
+        },
+        "message": "Riverside Pediatrics verification line. This call is recorded. What's the member ID and the patient's date of birth?"
+      },
+      {
+        "id": "lockout_notice",
+        "type": "speak",
+        "name": "Lockout Notice",
+        "position": {
+          "x": -400,
+          "y": 200
+        },
+        "message": "You've reached the attempt limit for verification."
+      },
+      {
+        "id": "caller_id_check",
+        "type": "speak",
+        "name": "Caller ID Check",
+        "position": {
+          "x": 400,
+          "y": 200
+        },
+        "message": "Please also tell me the patient's full name."
+      },
+      {
+        "id": "collect",
+        "type": "prompt",
+        "name": "Collect Member Info",
+        "position": {
+          "x": 0,
+          "y": 400
+        },
+        "instructions": "The caller has already been asked for the member ID and date of birth. Do not read them back and do not ask for confirmation. As soon as you have both, move on. If one is missing, ask only for that one. If {{is_returning_caller}} is true, start your first reply with \"Welcome back.\" Member IDs are always the letters R V P followed by six digits; if you hear another prefix (for example \"R B P\", \"R D P\", \"our VP\"), treat it as R V P. If the caller cannot provide both, offer to connect them with a specialist.",
+        "instructions_mode": "append",
+        "tools_mode": "replace",
+        "shared_tool_ids": []
+      },
+      {
+        "id": "verify",
+        "type": "prompt",
+        "name": "Verify Eligibility",
+        "position": {
+          "x": 0,
+          "y": 600
+        },
+        "instructions": "You are the insurance verification line for Riverside Pediatrics. Keep replies short. Call verify_eligibility with the member ID and date of birth the caller gave (date as YYYY-MM-DD) and caller_phone {{telnyx_end_user_target}}. Read the result to the caller:\n- If active: state the plan name and copay amount, then ask if they need anything else.\n- If inactive: tell the caller the coverage is inactive. Then, if {{human_transfer_enabled}} is true, ask whether they would like a transfer to a benefits specialist now or a callback; if it is false, offer only a callback.\n- If not_found: tell the caller you could not find that member.\n- If locked_out: tell the caller they've reached the attempt limit and you'll connect them with a specialist.\nIf the result is not_found, ask the caller once to repeat the member ID and call verify_eligibility again. Never call schedule_callback in this step; callbacks and transfers are handled in the next step.\nDo not guess or fabricate coverage information. Only state what the tool returns.",
+        "instructions_mode": "replace",
+        "tools_mode": "append"
+      },
+      {
+        "id": "resolve",
+        "type": "prompt",
+        "name": "Resolve",
+        "position": {
+          "x": -300,
+          "y": 800
+        },
+        "instructions": "The caller's eligibility could not be confirmed. If {{human_transfer_enabled}} is true, offer two options: a transfer to a specialist now, or a callback. If it is false, offer only the callback. If the caller asks for a specialist, a transfer or a person and transfer is available, hand off. Only call schedule_callback when the caller chooses a callback. After schedule_callback returns, read the caller the spoken_reference from the result exactly as given, then ask if there is anything else. When the caller says they need nothing else, say 'Thanks for calling Riverside Pediatrics. Goodbye.' and call the hangup tool in the same turn. Never say goodbye without calling hangup. If they ask about plan details or benefits, call get_plan_benefits with their member ID.",
+        "instructions_mode": "append",
+        "tools_mode": "append"
+      },
+      {
+        "id": "transfer_notice",
+        "type": "speak",
+        "name": "Transfer Notice",
+        "position": {
+          "x": -300,
+          "y": 1000
+        },
+        "message": "I'm transferring you to our benefits specialist now, one moment."
+      },
+      {
+        "id": "transfer_gate",
+        "type": "speak",
+        "name": "Transfer Gate",
+        "position": {
+          "x": -300,
+          "y": 900
+        },
+        "message": "One moment."
+      },
+      {
+        "id": "no_transfer",
+        "type": "speak",
+        "name": "No Transfer Available",
+        "position": {
+          "x": -600,
+          "y": 900
+        },
+        "message": "Live transfers aren't available right now, so I can set up a callback for you instead."
+      },
+      {
+        "id": "goodbye",
+        "type": "tool",
+        "name": "End Call",
+        "position": {
+          "x": 0,
+          "y": 1000
+        },
+        "shared_tool_id": "tool-c197145f-507c-4aae-81af-e27119417232",
+        "message": "Thanks for calling Riverside Pediatrics. Goodbye."
+      }
+    ],
+    "edges": [
+      {
+        "id": "locked_out",
+        "start_node_id": "disclosure",
+        "target": {
+          "type": "node",
+          "node_id": "lockout_notice"
+        },
+        "condition": {
+          "type": "expression",
+          "expression": {
+            "type": "comparison",
+            "op": "==",
+            "left": {
+              "type": "variable",
+              "name": "is_locked_out"
+            },
+            "right": {
+              "type": "string_literal",
+              "value": "true"
+            }
+          }
+        }
+      },
+      {
+        "id": "unverified_caller_id",
+        "start_node_id": "disclosure",
+        "target": {
+          "type": "node",
+          "node_id": "caller_id_check"
+        },
+        "condition": {
+          "type": "expression",
+          "expression": {
+            "type": "comparison",
+            "op": "!=",
+            "left": {
+              "type": "variable",
+              "name": "telnyx_shaken_stir_attestation"
+            },
+            "right": {
+              "type": "string_literal",
+              "value": "a"
+            }
+          }
+        }
+      },
+      {
+        "id": "start_collect",
+        "start_node_id": "disclosure",
+        "target": {
+          "type": "node",
+          "node_id": "collect"
+        },
+        "condition": {
+          "type": "default"
+        }
+      },
+      {
+        "id": "id_checked",
+        "start_node_id": "caller_id_check",
+        "target": {
+          "type": "node",
+          "node_id": "collect"
+        },
+        "condition": {
+          "type": "default"
+        }
+      },
+      {
+        "id": "lockout_transfer",
+        "start_node_id": "lockout_notice",
+        "target": {
+          "type": "node",
+          "node_id": "transfer_notice"
+        },
+        "condition": {
+          "type": "expression",
+          "expression": {
+            "type": "comparison",
+            "op": "==",
+            "left": {
+              "type": "variable",
+              "name": "human_transfer_enabled"
+            },
+            "right": {
+              "type": "string_literal",
+              "value": "true"
+            }
+          }
+        }
+      },
+      {
+        "id": "lockout_no_transfer",
+        "start_node_id": "lockout_notice",
+        "target": {
+          "type": "node",
+          "node_id": "no_transfer"
+        },
+        "condition": {
+          "type": "default"
+        }
+      },
+      {
+        "id": "details_confirmed",
+        "start_node_id": "collect",
+        "target": {
+          "type": "node",
+          "node_id": "verify"
+        },
+        "condition": {
+          "type": "llm",
+          "prompt": "The caller has given both a member ID and a date of birth."
+        }
+      },
+      {
+        "id": "cannot_provide",
+        "start_node_id": "collect",
+        "target": {
+          "type": "node",
+          "node_id": "resolve"
+        },
+        "condition": {
+          "type": "llm",
+          "prompt": "The caller cannot provide their member ID or date of birth."
+        }
+      },
+      {
+        "id": "not_confirmed",
+        "start_node_id": "verify",
+        "target": {
+          "type": "node",
+          "node_id": "resolve"
+        },
+        "condition": {
+          "type": "llm",
+          "prompt": "The eligibility check returned inactive or locked_out, OR it returned not_found twice, OR the caller asks for a specialist, a transfer, a person, or a callback, OR the caller disputes the result."
+        }
+      },
+      {
+        "id": "coverage_active",
+        "start_node_id": "verify",
+        "target": {
+          "type": "node",
+          "node_id": "goodbye"
+        },
+        "condition": {
+          "type": "llm",
+          "prompt": "The caller's coverage is confirmed as active and they have no further questions."
+        }
+      },
+      {
+        "id": "specialist_now",
+        "start_node_id": "resolve",
+        "target": {
+          "type": "node",
+          "node_id": "transfer_gate"
+        },
+        "condition": {
+          "type": "llm",
+          "prompt": "The caller wants to speak with a specialist now, and specialist transfer is available."
+        }
+      },
+      {
+        "id": "transfer_handoff",
+        "start_node_id": "transfer_notice",
+        "target": {
+          "type": "assistant",
+          "assistant_id": "assistant-6a391369-bd94-4446-a17a-8ad896efe50e",
+          "voice_mode": "distinct"
+        },
+        "condition": {
+          "type": "default"
+        }
+      },
+      {
+        "id": "callback_done",
+        "start_node_id": "resolve",
+        "target": {
+          "type": "node",
+          "node_id": "goodbye"
+        },
+        "condition": {
+          "type": "llm",
+          "prompt": "A callback was scheduled, the assistant has already spoken the callback reference to the caller, and the caller has said they need nothing else."
+        }
+      },
+      {
+        "id": "gate_transfer",
+        "start_node_id": "transfer_gate",
+        "target": {
+          "type": "node",
+          "node_id": "transfer_notice"
+        },
+        "condition": {
+          "type": "expression",
+          "expression": {
+            "type": "comparison",
+            "op": "==",
+            "left": {
+              "type": "variable",
+              "name": "human_transfer_enabled"
+            },
+            "right": {
+              "type": "string_literal",
+              "value": "true"
+            }
+          }
+        }
+      },
+      {
+        "id": "gate_no_transfer",
+        "start_node_id": "transfer_gate",
+        "target": {
+          "type": "node",
+          "node_id": "no_transfer"
+        },
+        "condition": {
+          "type": "default"
+        }
+      },
+      {
+        "id": "no_transfer_back",
+        "start_node_id": "no_transfer",
+        "target": {
+          "type": "node",
+          "node_id": "resolve"
+        },
+        "condition": {
+          "type": "default"
+        }
+      }
+    ]
+  },
+  "transcription": {
+    "model": "deepgram/flux",
+    "language": "en",
+    "settings": {
+      "eot_threshold": 0.8,
+      "eot_timeout_ms": 5000,
+      "eager_eot_threshold": 0.8,
+      "keyterm": "RVP"
+    }
+  }
+}
