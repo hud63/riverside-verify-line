@@ -1,146 +1,134 @@
 # Riverside Verify Line
 
-A voice assistant that verifies a pediatric patient's insurance eligibility over the phone. It is built on Telnyx Voice AI (a conversation workflow plus a hand-off to a second assistant), a custom MCP server and a StatefulActor running on a Telnyx Edge Function, with KV feature flags. All code was written through OpenCode with Telnyx-hosted Kimi-K2.6.
+A voice assistant that checks a pediatric patient's insurance eligibility over the phone, built on Telnyx Voice AI, an MCP server and a StatefulActor on a Telnyx Edge Function, and KV feature flags.
 
 | | |
 |---|---|
 | **Phone** | +1 786 892 9548 |
-| **Edge Function** | `https://verify-line-9f348eb3-0.telnyxcompute.com` |
-| **Routes** | `GET /` (index) · `POST /dv` (dynamic-variables webhook) · `POST /mcp` (MCP server) · `POST /admin/reset` (support) · `GET /health` |
-| **Main assistant** | `assistant-57e256d2-93ac-49e0-ae12-9e8ff11c1da7`, "Riverside Verify Line" (config: `workflow.json`) |
-| **Specialist** | `assistant-6a391369-bd94-4446-a17a-8ad896efe50e`, "Riverside Benefits Specialist" (config: `specialist.json`) |
-| **How to test** | [`DEMO.md`](DEMO.md): what the demo shows and what to say on each path |
-
----
+| **Edge Function** | https://verify-line-9f348eb3-0.telnyxcompute.com |
+| **How to test** | [`DEMO.md`](DEMO.md): what to say on each path |
+| **Main assistant** | `assistant-57e256d2-93ac-49e0-ae12-9e8ff11c1da7` ([`workflow.json`](workflow.json)) |
+| **Specialist** | `assistant-6a391369-bd94-4446-a17a-8ad896efe50e` ([`specialist.json`](specialist.json)) |
 
 ## Architecture
 
-```
- Caller ──► Telnyx number ──► Main assistant (conversation workflow)
-                                 │  call start
-                                 ├──────────────► POST /dv ──► KV FLAGS  (human_transfer_enabled, after_hours_mode)
-                                 │                         └─► CallerSession actor [hash(phone)]
-                                 │                              attempts · lockout · returning caller · pending callback
-                                 │  tools (MCP, _meta.telnyx_conversation_id on every call)
-                                 ├──────────────► POST /mcp
-                                 │                 verify_eligibility ─► actor[hash(phone)].recordAttempt
-                                 │                                    └► actor[conv id].rememberMember
-                                 │                 schedule_callback ─► actor[hash(phone)].scheduleCallback ─► alarm() in 2 min
-                                 │                 get_plan_benefits ─► actor[conv id].getMemberId
-                                 │
-                                 └─ hand-off (distinct voice) ──► Specialist assistant
-                                                                   get_plan_benefits {} → member_source: "conversation"
-```
+```mermaid
+flowchart LR
+    caller([📞 Caller]) --> main
 
-### Choosing the right primitive
+    subgraph voice [Telnyx Voice AI]
+        main["Main assistant<br/>conversation workflow"]
+        spec["Specialist assistant<br/>different voice"]
+        main -- "hand-off" --> spec
+    end
 
-| Need | Primitive | Why |
-|---|---|---|
-| Ops switches that change behaviour with no deploy | **KV** (`flags/human_transfer_enabled`, `flags/after_hours_mode`) | Read once per call in `/dv`, exposed as dynamic variables, enforced by **expression edges** |
-| Per-caller state that must be consistent (attempt counter, 30-min lockout) | **StatefulActor** keyed by `hash(phone)` | Single-threaded per caller, durable storage, no race between concurrent calls |
-| Deferred work (callback due in 2 min) | **Actor alarm** | Survives restarts, wakes a sleeping instance, at-least-once delivery |
-| Passing the verified member to the specialist **in code, not the prompt** | **StatefulActor** keyed by Telnyx's `conversation_id` | The conversation id is the same across the assistant hand-off; the specialist calls `get_plan_benefits` with no arguments |
-| Verbatim compliance lines (recording disclosure, transfer notice) | **Speak nodes** | Exact wording, not left to the model |
-| Policy (transfers allowed? caller locked out?) | **Expression edges** on dynamic variables | Evaluated by Telnyx before the model turn; the model can't override them |
-| Intent (does the caller want a specialist / a callback?) | **LLM edges** | Natural-language judgement |
+    subgraph edge [Telnyx Edge Function · verify-line]
+        dv["POST /dv<br/>dynamic variables"]
+        mcp["POST /mcp<br/>MCP server · 3 tools"]
+    end
 
-### Workflow (main assistant)
+    main -- "call start" --> dv
+    main -- "verify_eligibility<br/>schedule_callback" --> mcp
+    spec -- "get_plan_benefits" --> mcp
 
-`disclosure` (speak) → `locked_out`? → `lockout_notice` · STIR/SHAKEN not "A"? → `caller_id_check` · else → `collect` → `verify` (MCP `verify_eligibility`) → active: plan + copay → `goodbye` (hang-up tool node) · inactive / not found twice / caller asks → `resolve` → callback (`schedule_callback`, spoken reference, hang up) or specialist → `transfer_gate` → **`human_transfer_enabled == "true"`** → `transfer_notice` → specialist; otherwise → `no_transfer` → back to `resolve`.
+    dv --> kv[("KV<br/>feature flags")]
+    dv --> actor
+    mcp --> actor
 
-10 nodes, 16 edges. Both routes to the specialist (normal and lockout) pass the same expression gate.
+    subgraph actor [CallerSession actor]
+        caller_state["per caller<br/>attempts · lockout · callback alarm"]
+        conv_state["per conversation<br/>verified member"]
+    end
 
-### Data handling
-
-- Phone numbers: actor instance names are a SHA-256 of the digits, because instance names appear in platform invocation logs. Function logs carry `***` plus the last 4 digits only.
-- Member IDs and dates of birth are never logged.
-- The admin reset token lives in KV (`admin/reset_token`) and in the local `.env`, never in code.
-
----
-
-## Setup
-
-Prerequisites: Node 20+, the `telnyx-edge` CLI, a Telnyx API key in `../.env` (`TELNYX_API_KEY=…`), and OpenCode with the `@telnyx/opencode` plugin (`opencode.jsonc` in this folder).
-
-```sh
-npm install
-npx tsc --noEmit                      # typecheck
-telnyx-edge ship                      # deploy the function + CallerSession actor
-
-# KV flags (namespace in telnyx.toml)
-telnyx-edge storage kv key put <ns> flags/human_transfer_enabled true
-telnyx-edge storage kv key put <ns> flags/after_hours_mode false
-telnyx-edge storage kv key put <ns> admin/reset_token <random-secret>
-
-# Apply assistant configs
-curl -X POST https://api.telnyx.com/v2/ai/assistants/<main-id> \
-  -H "Authorization: Bearer $TELNYX_API_KEY" -H "Content-Type: application/json" \
-  --data-binary @workflow.json
-curl -X POST https://api.telnyx.com/v2/ai/assistants/<specialist-id> \
-  -H "Authorization: Bearer $TELNYX_API_KEY" -H "Content-Type: application/json" \
-  --data-binary @specialist.json
+    classDef ai fill:#e8f0fe,stroke:#4a6fd8,color:#1a1a1a
+    classDef fn fill:#e9f7ef,stroke:#2e9b5f,color:#1a1a1a
+    classDef store fill:#fff4e5,stroke:#d9822b,color:#1a1a1a
+    class main,spec ai
+    class dv,mcp fn
+    class kv,caller_state,conv_state store
 ```
 
-**Clear a caller's lockout** (support or demo):
-```sh
-curl -X POST https://verify-line-9f348eb3-0.telnyxcompute.com/admin/reset \
-  -H "x-admin-token: $ADMIN_RESET_TOKEN" -H "Content-Type: application/json" \
-  -d '{"phone":"+1XXXXXXXXXX"}'
+### Why each primitive
+
+- **KV:** ops switches (`human_transfer_enabled`, `after_hours_mode`). Read once per call, changed with no deploy.
+- **StatefulActor per caller** (keyed by a hash of the phone number): the attempt counter and 30-minute lockout. Single-threaded per caller, so concurrent calls can't lose a count.
+- **StatefulActor per conversation** (keyed by Telnyx's `conversation_id`): passes the verified member to the specialist in code, not in the prompt.
+- **Actor alarm:** fires the callback 2 minutes after booking. Survives restarts.
+- **Speak nodes:** the recording disclosure and transfer notice, word for word.
+- **Expression edges:** policy (locked out? transfers allowed?), evaluated by Telnyx, so the model can't override it.
+- **LLM edges:** intent only (does the caller want a specialist or a callback?).
+
+## Workflow
+
+```mermaid
+flowchart TD
+    disclosure["disclosure · speak"] -->|"is_locked_out"| lockout["lockout_notice · speak"]
+    disclosure -->|"caller ID not verified"| idcheck["caller_id_check · speak"]
+    disclosure -->|default| collect["collect · prompt"]
+    idcheck --> collect
+    collect -->|"has ID + DOB"| verify["verify · prompt<br/>verify_eligibility"]
+    collect -->|"can't provide"| resolve
+    verify -->|"active"| goodbye["goodbye · hang up"]
+    verify -->|"inactive / not found twice"| resolve["resolve · prompt<br/>schedule_callback"]
+    resolve -->|"callback booked"| goodbye
+    resolve -->|"wants specialist"| gate["transfer_gate · speak"]
+    gate -->|"human_transfer_enabled == true"| notice["transfer_notice · speak"]
+    gate -->|default| none["no_transfer · speak"]
+    lockout -->|"human_transfer_enabled == true"| notice
+    lockout -->|default| none
+    none --> resolve
+    notice --> specialist(["Specialist assistant"])
+
+    classDef speak fill:#fff4e5,stroke:#d9822b,color:#1a1a1a
+    classDef prompt fill:#e8f0fe,stroke:#4a6fd8,color:#1a1a1a
+    class disclosure,lockout,idcheck,gate,notice,none speak
+    class collect,verify,resolve prompt
 ```
 
-**Test members** (mock data in `src/mcp.ts`): `RVP100234` / 2016-04-12 (active, PPO) · `RVP200871` / 2019-09-03 (inactive, HMO) · eight more.
+Orange nodes are speak nodes and blue nodes are prompt nodes. Edges with a variable condition are expression edges; the rest are LLM or default edges.
 
----
+## Data handling
+
+- Actor keys are a SHA-256 of the phone digits, because instance names show up in platform logs.
+- Logs carry `***` plus the last 4 digits of the phone. Member IDs and dates of birth are never logged.
+- The admin reset token lives in KV and the local `.env`, never in code.
 
 ## Observability
 
-Details and real numbers: [`docs/observability.md`](docs/observability.md).
+Details: [`docs/observability.md`](docs/observability.md).
 
-- **Structured logs:** one JSON line per request: `requestId`, `route`, `action`, `outcome`, `level`, masked `callerId`, `callControlId`, `conversationId`, plus timing split into `kvMs`, `actorMs` and `totalMs`. Requests slower than 500 ms are raised to `warn`, and failures to `error`.
-- **Signals beyond logs:**
-  - **Per-request latency split** across Function → KV → Actor. It showed that the function's p99 of about 1 s is the KV flag read at call start, not the actor (actor p95 is 213 ms).
-  - **Platform metrics:** `telnyx-edge metrics verify-line` and `telnyx-edge actors metrics CallerSession`.
-  - **Actor invocation records:** one per method call, including `__alarm__`.
-  - **State read-backs:** `alarmInMs` when a callback is booked, `pendingCallback` at call start.
-- **Proof in the transcript:** `member_source: "conversation"` shows the specialist got the member from server state; `coverage_status` and `spoken_reference` are generated by the server.
+- **Structured logs:** one JSON line per request with `route`, `action`, `outcome`, masked caller, `conversationId`, and timing split into `kvMs`, `actorMs` and `totalMs`. Slow requests (over 500 ms) log as `warn`, failures as `error`.
+- **Signals beyond logs:** platform metrics (p50/p95/p99), actor invocation records (including every alarm), and state read-backs (`alarmInMs`, `pendingCallback`).
+- **One trace key:** `conversationId` joins the transcript, the webhook and every tool call.
 
-### How I'd know within a minute that it's broken, and what I'd look at first
-
-1. **First look:**
-   ```sh
-   telnyx-edge logs verify-line --since 5m | grep -E '"level":"(error|warn)"'
-   ```
-   - `/dv` errors mean every call starts on default values.
-   - `/mcp` errors mean tools are failing.
-   - `kvError` means the flag store is degraded. Calls still work, with transfers defaulting to on.
-2. **Is it everyone, or one caller?** Run `telnyx-edge metrics verify-line` and compare the error rate and p99 against the baseline (100% 2xx, p95 134 ms).
-3. **Did the conversation do the right thing?** Pull the transcript (`GET /v2/ai/conversations/{id}/messages`) and join it to the logs on `conversationId`. Tool calls and their outputs show which node misrouted.
-4. **Alerting** (not yet wired up): `telnyx-edge log-export` pushes these logs to a sink such as Datadog or S3, where an alert on `level=error` or on `/dv` p99 > 1.5 s gives the one-minute signal without anyone watching a terminal.
-
----
+**How I'd know within a minute that it's broken:**
+1. Filter the last 5 minutes of logs for `error` or `warn`. `/dv` errors mean calls start on defaults, `/mcp` errors mean tools are failing, and `kvError` means flags fell back to defaults.
+2. Check `telnyx-edge metrics verify-line` against the baseline (100% 2xx, p95 134 ms) to see whether it's everyone or one caller.
+3. Open the transcript for that `conversationId` to see which node misrouted.
+4. Next step, not built yet: export logs and alert on `level=error` or `/dv` p99 over 1.5 s.
 
 ## Debugging story
 
-[`docs/debugging-narrative.md`](docs/debugging-narrative.md): **"The kill switch that didn't kill."** With transfers turned off in KV, a caller who asked for a specialist was transferred anyway.
-- **The clue:** the transcript proved the flag had reached the model.
-- **The cause:** the transfer was an LLM edge, so the model overruled the policy.
-- **The fix:** an expression edge evaluated by Telnyx.
-- **The timing:** found in about 1 minute, live in about 2.
+Full write-up: [`docs/debugging-narrative.md`](docs/debugging-narrative.md).
 
-Bonus: an alarm that "never fired". It did; its logs go to the actor log stream, not the function's.
+- **Bug:** with transfers switched off in KV, a caller asking for a specialist was transferred anyway.
+- **Clue:** the transcript showed the assistant had offered only a callback, so the flag had reached it.
+- **Cause:** the transfer was an LLM edge, so the model decided, not the flag.
+- **Fix:** an expression-edge gate that Telnyx evaluates before the model turn.
 
----
+## Setup
 
-## Verified on real calls (2026-11-14)
+```sh
+npm install && npx tsc --noEmit
+telnyx-edge ship
+telnyx-edge storage kv key put <ns> flags/human_transfer_enabled true
+telnyx-edge storage kv key put <ns> admin/reset_token <secret>
+curl -X POST https://api.telnyx.com/v2/ai/assistants/<id> \
+  -H "Authorization: Bearer $TELNYX_API_KEY" --data-binary @workflow.json
+```
 
-| Path | Result |
-|---|---|
-| Active member → plan and copay → hang-up | ✅ |
-| Inactive → specialist hand-off; specialist reads back the member ID, gives benefits, hangs up | ✅ `member_source: "conversation"` |
-| Inactive → callback → reference read one character at a time → alarm fires at +2 min | ✅ `__alarm__ ok` on time |
-| Transfers off (KV) → caller asks for a specialist → refused, callback offered | ✅ expression gate |
-| 3 wrong DOBs across calls → `locked_out` → call back → lockout notice → specialist, no ID requested | ✅ |
+To clear a caller's lockout: `POST /admin/reset` with header `x-admin-token` and body `{"phone": "+1…"}`.
 
 ## Built with Telnyx Inference
 
-Every source change went through OpenCode with `telnyx/moonshotai/Kimi-K2.6`, using concrete edit specs, run in the background with a startup watchdog. I reviewed each diff, typechecked, deployed, and verified on a call or with a direct endpoint test.
+Every source change was written through OpenCode with `telnyx/moonshotai/Kimi-K2.6` ([`opencode.jsonc`](opencode.jsonc)). I reviewed each diff, typechecked, deployed and tested it on a real call.
