@@ -13,32 +13,34 @@ A voice assistant that checks a pediatric patient's insurance eligibility over t
 ## Architecture
 
 ```mermaid
-flowchart LR
-    caller([📞 Caller]) --> main
+flowchart TB
+    caller(["📞 Caller"]) --> main
 
-    subgraph voice [Telnyx Voice AI]
-        main["Main assistant<br/>conversation workflow"]
-        spec["Specialist assistant<br/>different voice"]
-        main -- "hand-off" --> spec
+    subgraph voice ["Telnyx Voice AI"]
+        direction LR
+        main["Main assistant<br/>conversation workflow"] -- "hand-off" --> spec["Specialist assistant<br/>different voice"]
     end
 
-    subgraph edge [Telnyx Edge Function · verify-line]
+    subgraph edge ["Telnyx Edge Function · verify-line"]
+        direction LR
         dv["POST /dv<br/>dynamic variables"]
         mcp["POST /mcp<br/>MCP server · 3 tools"]
     end
 
-    main -- "call start" --> dv
-    main -- "verify_eligibility<br/>schedule_callback" --> mcp
-    spec -- "get_plan_benefits" --> mcp
-
-    dv --> kv[("KV<br/>feature flags")]
-    dv --> actor
-    mcp --> actor
-
-    subgraph actor [CallerSession actor]
-        caller_state["per caller<br/>attempts · lockout · callback alarm"]
-        conv_state["per conversation<br/>verified member"]
+    subgraph state ["Edge state"]
+        direction LR
+        kv[("KV<br/>feature flags")]
+        caller_state["CallerSession actor · per caller<br/>attempts · lockout · callback alarm"]
+        conv_state["CallerSession actor · per conversation<br/>verified member"]
     end
+
+    main -- "call start" --> dv
+    main -- "verify_eligibility · schedule_callback" --> mcp
+    spec -- "get_plan_benefits" --> mcp
+    dv --> kv
+    dv --> caller_state
+    mcp --> caller_state
+    mcp --> conv_state
 
     classDef ai fill:#e8f0fe,stroke:#4a6fd8,color:#1a1a1a
     classDef fn fill:#e9f7ef,stroke:#2e9b5f,color:#1a1a1a
