@@ -55,7 +55,36 @@ export default {
       } else if (req.method === "GET" && url.pathname === "/") {
         entry.action = "index";
         entry.outcome = "ok";
-        response = Response.json({ service: "Riverside Verify Line", description: "Telnyx Voice AI insurance eligibility assistant: dynamic-variables webhook, MCP server and CallerSession actor on a Telnyx Edge Function.", phone: "+1 786 892 9548", routes: { "POST /dv": "dynamic-variables webhook (called by the assistant at call start)", "POST /mcp": "MCP server (JSON-RPC: initialize, tools/list, tools/call)", "GET /health": "health check" }, repo: "https://github.com/hud63/riverside-verify-line" });
+        const info = {
+          service: "Riverside Verify Line",
+          description: "Telnyx Voice AI insurance eligibility assistant: dynamic-variables webhook, MCP server and CallerSession actor on a Telnyx Edge Function.",
+          phone: "+1 786 892 9548",
+          routes: {
+            "POST /dv": "dynamic-variables webhook (called by the assistant at call start)",
+            "POST /mcp": "MCP server (JSON-RPC: initialize, tools/list, tools/call)",
+            "GET /health": "health check",
+          },
+          repo: "https://github.com/hud63/riverside-verify-line",
+        };
+        if ((req.headers.get("accept") ?? "").includes("text/html")) {
+          const rows = Object.entries(info.routes)
+            .map(([route, desc]) => `<tr><td><code>${route}</code></td><td>${desc}</td></tr>`)
+            .join("");
+          const html = `<!doctype html>
+<meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1">
+<title>Riverside Verify Line</title>
+<style>body{font-family:system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 16px;line-height:1.5;color:#1a1a1a;background:#fff} code{background:#f2f2f2;padding:2px 6px;border-radius:4px} table{border-collapse:collapse;width:100%} td{padding:6px 8px;border-bottom:1px solid #e5e5e5;vertical-align:top}</style>
+<h1>${info.service}</h1>
+<p>${info.description}</p>
+<p><strong>Call:</strong> <a href="tel:+17868929548">${info.phone}</a></p>
+<h2>Routes</h2>
+<table>${rows}</table>
+<p><a href=${info.repo}>Source on GitHub</a> · <a href="/health">Health check</a></p>`;
+          response = new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
+        } else {
+          response = Response.json(info);
+        }
       } else {
         entry.outcome = "not_found";
         response = Response.json({ error: "not_found" }, { status: 404 });
