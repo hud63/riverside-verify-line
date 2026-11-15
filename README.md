@@ -6,7 +6,7 @@ A voice assistant that verifies a pediatric patient's insurance eligibility over
 |---|---|
 | **Phone** | +1 786 892 9548 |
 | **Edge Function** | `https://verify-line-9f348eb3-0.telnyxcompute.com` |
-| **Routes** | `POST /dv` (dynamic-variables webhook) · `POST /mcp` (MCP server) · `POST /admin/reset` (support) · `GET /health` |
+| **Routes** | `GET /` (index) · `POST /dv` (dynamic-variables webhook) · `POST /mcp` (MCP server) · `POST /admin/reset` (support) · `GET /health` |
 | **Main assistant** | `assistant-57e256d2-93ac-49e0-ae12-9e8ff11c1da7`, "Riverside Verify Line" (config: `workflow.json`) |
 | **Specialist** | `assistant-6a391369-bd94-4446-a17a-8ad896efe50e`, "Riverside Benefits Specialist" (config: `specialist.json`) |
 | **How to test** | [`DEMO.md`](DEMO.md): what the demo shows and what to say on each path |

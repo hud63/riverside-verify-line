@@ -52,6 +52,10 @@ export default {
         response = await handleReset(req, env, entry);
       } else if (req.method === "GET" && url.pathname === "/health") {
         response = Response.json({ status: "ok", timestamp: new Date().toISOString() });
+      } else if (req.method === "GET" && url.pathname === "/") {
+        entry.action = "index";
+        entry.outcome = "ok";
+        response = Response.json({ service: "Riverside Verify Line", description: "Telnyx Voice AI insurance eligibility assistant: dynamic-variables webhook, MCP server and CallerSession actor on a Telnyx Edge Function.", phone: "+1 786 892 9548", routes: { "POST /dv": "dynamic-variables webhook (called by the assistant at call start)", "POST /mcp": "MCP server (JSON-RPC: initialize, tools/list, tools/call)", "GET /health": "health check" }, repo: "https://github.com/hud63/riverside-verify-line" });
       } else {
         entry.outcome = "not_found";
         response = Response.json({ error: "not_found" }, { status: 404 });
